@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.util.Date;
 import java.util.List;
 
+import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 
 import org.springframework.batch.core.Job;
@@ -26,6 +27,8 @@ import org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourc
 import org.springframework.batch.item.database.ItemPreparedStatementSetter;
 import org.springframework.batch.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.item.database.JdbcCursorItemReader;
+import org.springframework.batch.item.database.JpaCursorItemReader;
+import org.springframework.batch.item.database.JpaItemWriter;
 import org.springframework.batch.item.file.FlatFileFooterCallback;
 import org.springframework.batch.item.file.FlatFileHeaderCallback;
 import org.springframework.batch.item.file.FlatFileItemReader;
@@ -44,6 +47,7 @@ import org.springframework.batch.item.xml.StaxEventItemReader;
 import org.springframework.batch.item.xml.StaxEventItemWriter;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
@@ -52,6 +56,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.oxm.jaxb.Jaxb2Marshaller;
 
 import com.infybuzz.listener.FirstJobListener;
@@ -63,6 +68,7 @@ import com.infybuzz.model.StudentJdbc;
 import com.infybuzz.model.StudentJson;
 import com.infybuzz.model.StudentResponse;
 import com.infybuzz.model.StudentXml;
+import com.infybuzz.postgresql.entity.Student;
 import com.infybuzz.processor.FirstItemProcessor;
 import com.infybuzz.reader.FirstItemReader;
 import com.infybuzz.service.SecondTasklet;
@@ -84,18 +90,17 @@ public class SampleJob {
 	 */
 	
 	//@Autowired
-	@Bean
-	@Primary
-	@ConfigurationProperties(prefix = "spring.datasource")
-	public DataSource dataSource() {
-		return DataSourceBuilder.create().build();
-	};
+	@Autowired
+	@Qualifier("dataSource")
+	private DataSource dataSource;
 	
-	@Bean
-	@ConfigurationProperties(prefix = "spring.universitydatasource")
-	public DataSource universitydatasource() {
-		return DataSourceBuilder.create().build();
-	};
+	@Autowired
+	@Qualifier("postgresdatasource")
+	private DataSource postgresdatasource;
+	
+	@Autowired
+	@Qualifier("universitydatasource")
+	private DataSource universitydatasource;
 	
 	@Autowired
 	private SecondTasklet secondTasklet;
@@ -120,6 +125,17 @@ public class SampleJob {
 	
 	@Autowired
 	private SkipListenerImpl skipListenerImpl;
+	
+	@Autowired
+	@Qualifier("postgresqlEntityManagerFactory")
+	private EntityManagerFactory postgresEntityManagerFactory;
+	
+	@Autowired
+	@Qualifier("mysqlEntityManagerFactory")
+	private EntityManagerFactory mysqlEntityManagerFactory;
+	
+	@Autowired
+	private JpaTransactionManager jpaTransactionManager;
 	
 	@Bean
 	public Job firstJob() {
@@ -150,8 +166,9 @@ public class SampleJob {
 	
 	private Step firstChunkStep() {
 		return stepBuilderFactory.get("first chunk Step")
-				.<StudentCsv,StudentJson>chunk(3)
-				.reader(flatFileItemReader(null))
+				.<Student,com.infybuzz.mysql.entity.Student>chunk(3)
+				//.reader(flatFileItemReader(null))
+				.reader(jpaCursorItemReader(null,null))
 				//.reader(jsonItemReader(null))
 				//.reader(staxEventItemReader(null))
 				//.reader(jdbcCursorItemReader())
@@ -159,11 +176,12 @@ public class SampleJob {
 				.processor(firstItemProcessor)
 				//.writer(firstItemWriter)
 				//.writer(flatFileItemWriter(null))
-				.writer(jsonFileItemWriter(null))
+				//.writer(jsonFileItemWriter(null))
 				//.writer(staxEventItemWriter(null))
 				//.writer(jdbcBatchItemWriter())
 				//.writer(jdbcBatchItemWriter1())
 				//.writer(itemWriterAdapter())
+				.writer(jpaItemWriter())
 				.faultTolerant()
 				//.skip(FlatFileParseException.class)
 				//.skip(NullPointerException.class)
@@ -174,6 +192,7 @@ public class SampleJob {
 				.retry(Throwable.class)
 				//.listener(skipListener)
 				.listener(skipListenerImpl)
+				.transactionManager(jpaTransactionManager)
 				.build();
 	}
 	
@@ -295,7 +314,7 @@ public class SampleJob {
 		JdbcBatchItemWriter<StudentCsv> jdbcBatchItemWriter = 
 				new JdbcBatchItemWriter<StudentCsv> ();
 		
-		jdbcBatchItemWriter.setDataSource(universitydatasource());
+		jdbcBatchItemWriter.setDataSource(universitydatasource);
 		jdbcBatchItemWriter.setSql(
 				"insert into student(id,first_name,last_name,email) "+
 		"values  (:ID,:firstName,:lastName,:email)");
@@ -310,7 +329,7 @@ public class SampleJob {
 		JdbcBatchItemWriter<StudentCsv> jdbcBatchItemWriter = 
 				new JdbcBatchItemWriter<StudentCsv> ();
 		
-		jdbcBatchItemWriter.setDataSource(universitydatasource());
+		jdbcBatchItemWriter.setDataSource(universitydatasource);
 		jdbcBatchItemWriter.setSql(
 				"insert into student(id,first_name,last_name,email) "+
 		"values  (?,?,?,?)");
@@ -334,7 +353,7 @@ public class SampleJob {
 	public JdbcCursorItemReader<StudentJdbc> jdbcCursorItemReader(){
 		JdbcCursorItemReader<StudentJdbc> jdbcCursorItemReader = 
 				new JdbcCursorItemReader<StudentJdbc>();
-		jdbcCursorItemReader.setDataSource(universitydatasource());
+		jdbcCursorItemReader.setDataSource(universitydatasource);
 		jdbcCursorItemReader.setSql(
 				"select id,first_name as firstName, last_name as lastName,"+
 		"email from student");
@@ -436,4 +455,28 @@ public class SampleJob {
 	 * System.out.println("this is second tasklet step"); return
 	 * RepeatStatus.FINISHED; } }; }
 	 */
+	
+	@StepScope
+	@Bean
+	public JpaCursorItemReader<Student> jpaCursorItemReader(
+			@Value("#{jobParameters['currentItemCount']}") Integer currentItemCount,
+			@Value("#{jobParameters['maxItemCount']}") Integer maxItemCount){
+		JpaCursorItemReader<Student> jpaCursorItemReader = 
+				new JpaCursorItemReader<Student>();
+		jpaCursorItemReader.setEntityManagerFactory(postgresEntityManagerFactory);
+		jpaCursorItemReader.setQueryString("From Student");
+		jpaCursorItemReader.setCurrentItemCount(currentItemCount);
+		jpaCursorItemReader.setMaxItemCount(maxItemCount);
+		return jpaCursorItemReader;
+	}
+	
+	public JpaItemWriter<com.infybuzz.mysql.entity.Student> jpaItemWriter(){
+		JpaItemWriter<com.infybuzz.mysql.entity.Student> jpaItemWriter = 
+				new JpaItemWriter<com.infybuzz.mysql.entity.Student> ();
+		jpaItemWriter.setEntityManagerFactory(mysqlEntityManagerFactory);
+		
+		
+		
+		return jpaItemWriter;
+	}
 }
